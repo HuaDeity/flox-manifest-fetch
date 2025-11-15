@@ -5,62 +5,55 @@ with lib;
 let
   cfg = config.floxManifests;
 
-  # Fetch a single flox manifest from floxmeta repo
+  # Fetch a single flox manifest from floxmeta repo using builtins.fetchGit
   fetchFloxManifest = { user, environment, token }:
-    pkgs.stdenv.mkDerivation {
-      name = "flox-manifest-${user}-${environment}";
+    let
+      # Fetch the floxmeta repo for this environment using builtins.fetchGit
+      floxmeta = builtins.fetchGit {
+        url = "https://oauth:${token}@api.flox.dev/git/${user}/floxmeta";
+        ref = environment;
+        # shallow = true; # Not all Nix versions support this
+      };
 
-      # Use git from nixpkgs
-      nativeBuildInputs = [ pkgs.git pkgs.findutils pkgs.coreutils ];
+      # Read the directory entries
+      entries = builtins.readDir floxmeta;
 
-      # Disable sandboxing to allow network access
-      __noChroot = true;
+      # Filter for numeric directory names (generations)
+      # entries is an attrset like { "1" = "directory"; "23" = "directory"; ... }
+      generations = lib.filterAttrs (name: type:
+        type == "directory" && builtins.match "[0-9]+" name != null
+      ) entries;
 
-      # We need network access
-      outputHashMode = "recursive";
-      outputHashAlgo = "sha256";
-      outputHash = lib.fakeSha256; # Will need to be updated after first build
+      # Get list of generation numbers as integers
+      generationNumbers = map lib.toInt (builtins.attrNames generations);
 
-      buildCommand = ''
-        set -euo pipefail
+      # Find the latest (maximum) generation
+      latestGeneration =
+        if generationNumbers == [] then
+          throw "No generation directories found in floxmeta for ${user}/${environment}"
+        else
+          toString (lib.foldl lib.max 0 generationNumbers);
 
-        # Clone the floxmeta repo for this environment
-        echo "Cloning floxmeta for environment: ${environment}"
-        git clone --depth 1 --branch "${environment}" \
-          "https://oauth:${token}@api.flox.dev/git/${user}/floxmeta" \
-          floxmeta 2>&1 | grep -v "oauth:" || true
+      # Path to the manifest
+      manifestPath = "${floxmeta}/${latestGeneration}/env/manifest.toml";
 
-        # Find the latest generation (highest number directory)
-        cd floxmeta
-        latest_gen=$(find . -maxdepth 1 -type d -regex '.*/[0-9]+' | \
-                     sed 's|./||' | \
-                     sort -n | \
-                     tail -1)
+    in
+    # Create a derivation that copies the manifest
+    pkgs.runCommand "flox-manifest-${user}-${environment}" {
+      inherit latestGeneration;
+      passthru = {
+        inherit floxmeta latestGeneration;
+      };
+    } ''
+      if [ ! -f "${manifestPath}" ]; then
+        echo "Error: Manifest not found at ${manifestPath}" >&2
+        exit 1
+      fi
 
-        if [ -z "$latest_gen" ]; then
-          echo "Error: No generation directories found in floxmeta" >&2
-          exit 1
-        fi
-
-        echo "Found latest generation: $latest_gen"
-
-        # Check if manifest exists
-        manifest_path="$latest_gen/env/manifest.toml"
-        if [ ! -f "$manifest_path" ]; then
-          echo "Error: Manifest not found at $manifest_path" >&2
-          exit 1
-        fi
-
-        # Copy manifest to output
-        mkdir -p $out
-        cp "$manifest_path" $out/manifest.toml
-        echo "$latest_gen" > $out/generation
-
-        echo "Successfully fetched manifest from generation $latest_gen"
-      '';
-
-      preferLocalBuild = false;
-    };
+      mkdir -p $out
+      cp "${manifestPath}" $out/manifest.toml
+      echo "${latestGeneration}" > $out/generation
+    '';
 
   # Resolve token with fallback chain
   resolveToken =

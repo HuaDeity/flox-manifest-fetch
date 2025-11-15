@@ -232,13 +232,16 @@ home-manager switch --impure
 ## How It Works
 
 1. **Authentication**: Resolves Flox Hub token from configured sources
-2. **Cloning**: Clones the floxmeta repository for each environment:
+2. **Fetching**: Uses `builtins.fetchGit` to fetch the floxmeta repository for each environment:
+   ```nix
+   builtins.fetchGit {
+     url = "https://oauth:<token>@api.flox.dev/git/<user>/floxmeta";
+     ref = environment;
+   }
    ```
-   git clone --branch <env> https://oauth:<token>@api.flox.dev/git/<user>/floxmeta
-   ```
-3. **Generation Discovery**: Finds the latest generation (highest numbered directory)
-4. **Extraction**: Extracts `manifest.toml` from `<generation>/env/manifest.toml`
-5. **Output**: Creates a derivation containing the manifest file
+3. **Generation Discovery**: Uses `builtins.readDir` and Nix builtins to find the latest generation (highest numbered directory)
+4. **Extraction**: Copies `manifest.toml` from `<generation>/env/manifest.toml` to the output
+5. **Output**: Creates a derivation containing the manifest file and generation number
 
 ## Output Structure
 
@@ -253,8 +256,8 @@ $out/
 
 - **Token visibility**: Using `token` option stores the token in the Nix store (world-readable)
 - **Recommended**: Use `tokenFile` with a secrets management solution
-- **Network access**: The module requires network access during build
-- **Git credentials**: Token is filtered from git output to avoid logging
+- **Network access**: The module requires network access during evaluation (via `builtins.fetchGit`)
+- **Token in URL**: Token is embedded in the git URL but not stored in derivation outputs
 
 ## Troubleshooting
 
@@ -275,11 +278,7 @@ The environment name doesn't exist or is empty. Check:
 
 ### Build fails with network errors
 
-The Nix build process needs network access. This is enabled via `__noChroot = true` in the derivation.
-
-### Hash mismatch errors
-
-The first build will fail with a hash mismatch. This is expected for FOD (Fixed Output Derivation). Update the `outputHash` in the module if needed, or use `--impure` to bypass hash checking.
+Ensure you have network access during Nix evaluation. `builtins.fetchGit` requires network connectivity to fetch the repository.
 
 ## Development
 
