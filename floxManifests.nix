@@ -219,23 +219,41 @@ in
     };
   };
 
-  config = mkIf cfg.enable {
-    # Set the manifests output
-    floxManifests.manifests = manifestDerivations;
+  config = mkIf cfg.enable (mkMerge [
+    {
+      # Validate configuration
+      _module.args = {
+        # Basic validation via assertions in the value itself
+        # This works even without NixOS/home-manager assertions support
+      };
 
-    # Optionally copy manifests to outputPath
-    # This would be used differently in NixOS vs home-manager
-    # For now, users can access via the manifests attribute
+      # Set the manifests output
+      floxManifests.manifests =
+        if cfg.user == "" then
+          throw "floxManifests.user must be set"
+        else if cfg.environments == [] then
+          throw "floxManifests.environments must not be empty"
+        else
+          manifestDerivations;
 
-    assertions = [
-      {
-        assertion = cfg.user != "";
-        message = "floxManifests.user must be set";
-      }
-      {
-        assertion = cfg.environments != [];
-        message = "floxManifests.environments must not be empty";
-      }
-    ];
-  };
+      # Optionally copy manifests to outputPath
+      # This would be used differently in NixOS vs home-manager
+      # For now, users can access via the manifests attribute
+    }
+
+    # Only add assertions if running in NixOS/home-manager context
+    # (optional assertions support for better error messages)
+    (mkIf (options ? assertions) {
+      assertions = [
+        {
+          assertion = cfg.user != "";
+          message = "floxManifests.user must be set";
+        }
+        {
+          assertion = cfg.environments != [];
+          message = "floxManifests.environments must not be empty";
+        }
+      ];
+    })
+  ]);
 }
