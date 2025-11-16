@@ -120,10 +120,10 @@
               ENV_CACHE="$CACHE_DIR/$env"
               TEMP_DIR=$(mktemp -d)
 
-              # Clone the floxmeta repo (quietly)
-              if git clone --quiet --depth 1 --branch "$env" \
+              # Clone the floxmeta repo
+              if git clone --depth 1 --branch "$env" \
                 "https://oauth:$TOKEN@api.flox.dev/git/$FLOX_USER/floxmeta" \
-                "$TEMP_DIR" 2>&1 | grep -v "Cloning into" | sed "s/$TOKEN/[REDACTED]/g"; then
+                "$TEMP_DIR" 2>&1 | sed "s/$TOKEN/[REDACTED]/g" >&2; then
 
                 cd "$TEMP_DIR"
 
