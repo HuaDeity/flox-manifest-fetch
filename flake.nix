@@ -134,6 +134,11 @@
             echo "Cache directory: $CACHE_DIR"
             echo ""
 
+            # Convert cache directory to absolute path
+            if [[ "$CACHE_DIR" != /* ]]; then
+              CACHE_DIR="$(pwd)/$CACHE_DIR"
+            fi
+
             # Create cache directory
             mkdir -p "$CACHE_DIR"
 
