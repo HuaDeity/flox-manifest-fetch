@@ -43,7 +43,7 @@ fetch-manifests config-path:
     echo ""
 
     # Run fetch-manifests
-    nix run .#fetch-manifests -- --envs "$envs" --cache-dir "$cache_dir"
+    nix run github:HuaDeity/flox-manifest-fetch#fetch-manifests -- --envs "$envs" --cache-dir "$cache_dir"
 
 [private]
 [macos]

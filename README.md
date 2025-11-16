@@ -16,7 +16,7 @@ Fetch Flox manifests from FloxHub and use them in your Nix configurations.
 
 ```nix
 {
-  inputs.flox-manifest-fetch.url = "github:yourusername/flox-manifest-fetch";
+  inputs.flox-manifest-fetch.url = "github:HuaDeity/flox-manifest-fetch";
 
   outputs = { self, flox-manifest-fetch, ... }: {
     # Darwin example
@@ -54,6 +54,7 @@ just update
 ```
 
 **That's it!** The `just update` command will:
+
 - Auto-detect your hostname
 - Extract environments and cache-dir from your Nix config
 - Fetch the latest Flox manifests
@@ -75,17 +76,21 @@ nixos-rebuild switch
 ### Two-Step Workflow
 
 **Step 1: Fetch (manual)**
+
 ```bash
 nix run .#fetch-manifests -- --user YOU --envs default
 ```
+
 - Runs outside Nix evaluation
 - Fetches latest manifests from FloxHub
 - Stores in local cache directory
 
 **Step 2: Use (automatic)**
+
 ```nix
 floxManifests.manifests  # List of cache paths
 ```
+
 - Module reads from cache
 - Pure Nix evaluation
 - No network access
@@ -93,22 +98,26 @@ floxManifests.manifests  # List of cache paths
 ## Module Options
 
 ### `floxManifests.enable`
+
 - Type: `boolean`
 - Default: `false`
 
 ### `floxManifests.environments`
+
 - Type: `list of strings`
 - Default: `[]`
 - Example: `[ "default" "development" ]`
 - Environment names to load
 
 ### `floxManifests.cacheDir`
+
 - Type: `string`
 - Default: `".flox-manifests"`
 - Example: `"/etc/flox-manifests"`
 - Cache directory path
 
 ### `floxManifests.manifests` (read-only)
+
 - Type: `list of strings`
 - List of paths to cached manifest directories
 - Example: `[ ".flox-manifests/default" ".flox-manifests/development" ]`
@@ -131,6 +140,7 @@ nix run .#fetch-manifests -- [OPTIONS]
 ### Authentication
 
 Automatically uses:
+
 - Username from `flox auth status`
 - Token from `flox auth token`
 
@@ -159,22 +169,26 @@ just show
 ### Main Commands
 
 **`just update`** - Fetch manifests and rebuild system
+
 - Auto-detects hostname from `hostname -s`
 - Extracts config from `.#darwinConfigurations.{hostname}` (macOS) or `.#nixosConfigurations.{hostname}` (Linux)
 - Fetches Flox manifests if enabled
 - Runs `just switch` to rebuild
 
 **`just update-home [user]`** - Update home-manager
+
 - Defaults to current user
 - Extracts config from `.#homeConfigurations."{user}@{hostname}"`
 - Fetches manifests and runs `home-manager switch`
 
 **`just show`** - Show Flox manifests configuration
+
 - Displays enabled status, environments, and cache directory
 
 ### Standard Commands
 
 All standard rebuild commands work as expected:
+
 - `just build` - Build system configuration
 - `just switch` - Switch to new configuration (with confirmation)
 - `just check` - Check configuration
@@ -185,6 +199,7 @@ All standard rebuild commands work as expected:
 ### How It Works
 
 The `update` command automatically:
+
 1. Detects your hostname
 2. Checks if `floxManifests.enable = true` in your config
 3. Extracts environments and cache directory from your config
@@ -277,12 +292,14 @@ If `floxManifests` is not enabled, it skips the fetch step gracefully.
 ### Daily Development
 
 **Recommended workflow with justfile:**
+
 ```bash
 # One command to fetch manifests and rebuild
 just update
 ```
 
 **Manual workflow:**
+
 ```bash
 # Fetch manifests
 nix run .#fetch-manifests -- --envs default
@@ -294,6 +311,7 @@ nixos-rebuild switch --flake .
 ### CI/CD
 
 **With justfile:**
+
 ```yaml
 steps:
   - name: Setup
@@ -306,6 +324,7 @@ steps:
 ```
 
 **Manual:**
+
 ```yaml
 steps:
   - name: Fetch and build
@@ -318,6 +337,7 @@ steps:
 ### Git: Commit Manifests
 
 **With justfile:**
+
 ```bash
 # Update includes fetch
 just update
@@ -332,6 +352,7 @@ just update
 ```
 
 **Manual:**
+
 ```bash
 # Fetch and commit
 nix run .#fetch-manifests -- --envs default
@@ -351,12 +372,14 @@ nixos-rebuild switch
 ```
 
 **With justfile:**
+
 ```bash
 # Each developer runs update (fetches automatically)
 just update
 ```
 
 **Manual:**
+
 ```bash
 # Each developer fetches locally
 nix run .#fetch-manifests -- --envs default
@@ -391,12 +414,14 @@ nix run .#fetch-manifests -- --envs default
 ### "Could not detect username"
 
 Make sure you're logged in:
+
 ```bash
 flox auth login
 flox auth status  # Should show: "You are logged in as USERNAME..."
 ```
 
 Or provide username manually:
+
 ```bash
 nix run .#fetch-manifests -- --user USERNAME --envs default
 ```
@@ -416,11 +441,13 @@ nix run .#fetch-manifests -- --cache-dir /etc/flox --envs default
 ## Why Two Steps?
 
 ### Without Separation
+
 - Network access during eval → requires `--impure`
 - No control over updates → surprise rebuilds
 - Slow, unreliable evaluation
 
 ### With Separation
+
 - Explicit fetch step → you control when
 - Pure evaluation → fast and deterministic
 - Works offline after fetch → reliable
