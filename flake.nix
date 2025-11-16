@@ -19,16 +19,16 @@
     in
     {
       # NixOS module - with flox package injected
-      nixosModules.floxManifests = { pkgs, ... }: {
+      nixosModules.floxManifests = { pkgs, lib, ... }: {
         imports = [ (import ./floxManifests.nix) ];
-        config._module.args.floxPackage = flox.packages.${pkgs.system}.default or null;
+        config._module.args.floxPackage = lib.mkDefault (flox.packages.${pkgs.system}.default or null);
       };
       nixosModules.default = self.nixosModules.floxManifests;
 
       # Home Manager module - with flox package injected
-      homeManagerModules.floxManifests = { pkgs, ... }: {
+      homeManagerModules.floxManifests = { pkgs, lib, ... }: {
         imports = [ (import ./floxManifests.nix) ];
-        config._module.args.floxPackage = flox.packages.${pkgs.system}.default or null;
+        config._module.args.floxPackage = lib.mkDefault (flox.packages.${pkgs.system}.default or null);
       };
       homeManagerModules.default = self.homeManagerModules.floxManifests;
 
