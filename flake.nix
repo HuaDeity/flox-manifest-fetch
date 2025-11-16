@@ -123,7 +123,7 @@
               # Clone the floxmeta repo
               if git clone --quiet --depth 1 --branch "$env" \
                 "https://oauth:$TOKEN@api.flox.dev/git/$FLOX_USER/floxmeta" \
-                "$TEMP_DIR" 2>&1 | sed "s/$TOKEN/[REDACTED]/g" | grep -v "^Cloning into" >&2; then
+                "$TEMP_DIR" 2>&1 | sed "s/$TOKEN/[REDACTED]/g" | { grep -v "^Cloning into" || true; } >&2; then
 
                 cd "$TEMP_DIR"
 
