@@ -6,7 +6,7 @@ let
   cfg = config.floxManifests;
 
   # Build list of manifest paths
-  manifestPaths = map (env: "${cfg.cacheDir}/${env}") cfg.environments;
+  manifestPaths = map (env: "${cfg.cacheDir}/${env}/manifest.toml") cfg.environments;
 
 in
 {
@@ -15,8 +15,11 @@ in
 
     environments = mkOption {
       type = types.listOf types.str;
-      default = [];
-      example = [ "default" "development" ];
+      default = [ ];
+      example = [
+        "default"
+        "development"
+      ];
       description = "List of Flox environment names";
     };
 
