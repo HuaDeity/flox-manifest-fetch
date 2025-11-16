@@ -6,6 +6,14 @@ result-*
 .direnv/
 .envrc
 
+# Manifest cache (fetched by fetch-manifests script)
+.flox-manifests/
+
+# Test files
+test/result
+test/result-*
+*.toml.test
+
 # Editor files
 *.swp
 *.swo
