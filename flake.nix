@@ -22,6 +22,8 @@
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
+      flakeModules.floxManifests = import ./floxManifests.nix;
+
       # Packages for testing/examples
       packages = forAllSystems (
         system:
@@ -67,13 +69,15 @@
                     echo "Fetch Flox manifests from FloxHub to local cache"
                     echo ""
                     echo "Options:"
-                    echo "  --user USER         Flox username (or set FLOX_USER)"
-                    echo "  --envs ENV1,ENV2    Comma-separated environments (or set FLOX_ENVS)"
+                    echo "  --user USER         Flox username (auto-detected from 'flox auth status')"
+                    echo "  --envs ENV1,ENV2    Comma-separated environments (required)"
                     echo "  --cache-dir DIR     Cache directory (default: .flox-manifests)"
                     echo "  --help, -h          Show this help"
                     echo ""
                     echo "Authentication:"
-                    echo "  Uses 'flox auth token' - run 'flox auth login' first"
+                    echo "  Username auto-detected from 'flox auth status'"
+                    echo "  Token from 'flox auth token'"
+                    echo "  Run 'flox auth login' first"
                     exit 0
                     ;;
                   *)
@@ -84,9 +88,15 @@
                 esac
               done
 
+              # Auto-detect username from flox auth status if not provided
+              if [ -z "$FLOX_USER" ]; then
+                FLOX_USER=$(flox auth status 2>&1 | grep "logged in as" | awk '{print $6}')
+              fi
+
               # Validate required parameters
               if [ -z "$FLOX_USER" ]; then
-                echo "Error: FLOX_USER is required (use --user or set FLOX_USER env var)" >&2
+                echo "Error: Could not detect username" >&2
+                echo "Either run 'flox auth login' or use --user option" >&2
                 exit 1
               fi
 
