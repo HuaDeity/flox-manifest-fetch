@@ -6,6 +6,11 @@ result-*
 .direnv/
 .envrc
 
+# Test files
+test/result
+test/result-*
+*.toml.test
+
 # Editor files
 *.swp
 *.swo

@@ -2,9 +2,10 @@
   description = "Nix module for fetching Flox manifests";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Use Flox's nixpkgs fork for better compatibility
+    nixpkgs.url = "github:flox/nixpkgs/stable";
 
-    # Optional: flox CLI for token resolution fallback
+    # Flox CLI for token resolution fallback
     flox = {
       url = "github:flox/flox";
       inputs.nixpkgs.follows = "nixpkgs";

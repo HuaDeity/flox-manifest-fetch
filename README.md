@@ -11,6 +11,7 @@ A Nix module for fetching Flox environment manifests from FloxHub. This module i
 - 🏠 **Home-manager & NixOS**: Works with both configuration systems
 - 🔒 **Secrets-friendly**: Integrates with sops-nix, agenix, etc.
 - 🚀 **Flox included**: Flox CLI included as flake input (no separate installation needed)
+- 📚 **Flox nixpkgs**: Uses `github:flox/nixpkgs/stable` for better Flox compatibility
 
 ## Quick Start
 
@@ -326,6 +327,19 @@ nixpkgs-fmt .
 export FLOX_FLOXHUB_TOKEN="your-token"
 nix-build examples/standalone.nix --impure
 ```
+
+## Testing
+
+See the [`test/`](./test/) directory for comprehensive test configurations:
+
+```bash
+cd test
+export FLOX_FLOXHUB_TOKEN="your-token"
+nix build .#test-manifest --impure
+cat result/manifest.toml
+```
+
+See [test/README.md](./test/README.md) for detailed testing instructions.
 
 ## Examples
 
