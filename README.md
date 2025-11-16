@@ -10,6 +10,7 @@ A Nix module for fetching Flox environment manifests from FloxHub. This module i
 - 📦 **Multi-environment**: Fetch manifests from multiple Flox environments
 - 🏠 **Home-manager & NixOS**: Works with both configuration systems
 - 🔒 **Secrets-friendly**: Integrates with sops-nix, agenix, etc.
+- 🚀 **Flox included**: Flox CLI included as flake input (no separate installation needed)
 
 ## Quick Start
 
@@ -86,11 +87,16 @@ A Nix module for fetching Flox environment manifests from FloxHub. This module i
 - **Example**: `"/run/secrets/flox-token"`
 - **Description**: Path to file containing Flox Hub token (recommended for secrets)
 
+### `floxManifests.floxPackage`
+- **Type**: `null or package`
+- **Default**: `flox.packages.${system}.default` (from flake input)
+- **Description**: Flox package to use for `flox auth token` command (used in fallback chain)
+
 ### `floxManifests.floxBin`
 - **Type**: `string`
 - **Default**: `"flox"`
 - **Example**: `"/home/user/.nix-profile/bin/flox"`
-- **Description**: Flox binary path or name (used in fallback chain)
+- **Description**: Flox binary path or name (fallback if floxPackage is not available)
 
 ### `floxManifests.manifests` (read-only)
 - **Type**: `attribute set of derivations`
@@ -103,8 +109,12 @@ The module tries the following sources in order:
 1. **`token` option** (Pure) - Direct token value
 2. **`tokenFile` option** (Pure) - Read from file
 3. **`FLOX_FLOXHUB_TOKEN` env var** (Impure) - Requires `--impure` flag
-4. **`flox auth token` CLI** (Impure) - Requires `--impure` and flox installed
+4. **`flox auth token` CLI** (Impure) - Requires `--impure`
+   - Uses `floxPackage` option (defaults to flox from flake input)
+   - Falls back to `floxBin` if floxPackage not available
 5. **`~/.config/flox/flox.toml`** (Impure) - Requires `--impure`
+
+**Note**: The module includes flox as a flake input, so you don't need to install flox separately to use the CLI fallback.
 
 ### Pure vs Impure
 
@@ -213,13 +223,15 @@ cat result/manifest.toml
 
 ### Using flox CLI for token
 
+The module includes flox from the flake input, so it will automatically use it:
+
 ```nix
 {
   floxManifests = {
     enable = true;
     user = "myusername";
     environments = [ "default" ];
-    # Will automatically use 'flox auth token' as fallback
+    # Will automatically use 'flox auth token' from flake input as fallback
   };
 }
 ```
@@ -227,6 +239,27 @@ cat result/manifest.toml
 Then build with:
 ```bash
 home-manager switch --impure
+```
+
+### Using a custom flox package
+
+If you want to use a different version of flox:
+
+```nix
+{
+  inputs.my-flox.url = "github:flox/flox/v1.2.3";
+
+  outputs = { flox-manifest-fetch, my-flox, ... }: {
+    homeConfigurations.user = {
+      floxManifests = {
+        enable = true;
+        user = "myusername";
+        environments = [ "default" ];
+        floxPackage = my-flox.packages.${pkgs.system}.default;
+      };
+    };
+  };
+}
 ```
 
 ## How It Works

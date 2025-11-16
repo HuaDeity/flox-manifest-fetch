@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, floxPackage ? null, ... }:
 
 with lib;
 
@@ -72,10 +72,17 @@ let
     # 4. Flox CLI (Impure - requires --impure and flox installed)
     else
       let
+        # Determine which flox binary to use
+        floxExe =
+          if cfg.floxPackage != null then
+            "${cfg.floxPackage}/bin/flox"
+          else
+            cfg.floxBin;
+
         # Try to get token from flox CLI
         tryFloxCli = pkgs.runCommand "flox-token-cli" {} ''
-          if command -v ${cfg.floxBin} >/dev/null 2>&1; then
-            ${cfg.floxBin} auth token > $out 2>/dev/null || echo "" > $out
+          if command -v ${floxExe} >/dev/null 2>&1; then
+            ${floxExe} auth token > $out 2>/dev/null || echo "" > $out
           else
             echo "" > $out
           fi
@@ -165,12 +172,23 @@ in
       '';
     };
 
+    floxPackage = mkOption {
+      type = types.nullOr types.package;
+      default = floxPackage;
+      defaultText = "flox package from flake input";
+      description = ''
+        Flox package to use for 'flox auth token' command.
+        Defaults to the flox package from the flake input.
+        Used as fallback if no token is provided via other methods.
+      '';
+    };
+
     floxBin = mkOption {
       type = types.str;
       default = "flox";
       example = "/home/user/.nix-profile/bin/flox";
       description = ''
-        Flox binary path or name.
+        Flox binary path or name (fallback if floxPackage is not available).
         Used as fallback if no token is provided via other methods.
         Requires --impure flag.
       '';

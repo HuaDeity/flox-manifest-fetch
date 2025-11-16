@@ -3,20 +3,32 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # Optional: flox CLI for token resolution fallback
+    flox = {
+      url = "github:flox/flox";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, flox }:
     let
       supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
-      # NixOS module
-      nixosModules.floxManifests = import ./floxManifests.nix;
+      # NixOS module - with flox package injected
+      nixosModules.floxManifests = { pkgs, ... }: {
+        imports = [ (import ./floxManifests.nix) ];
+        config._module.args.floxPackage = flox.packages.${pkgs.system}.default or null;
+      };
       nixosModules.default = self.nixosModules.floxManifests;
 
-      # Home Manager module
-      homeManagerModules.floxManifests = import ./floxManifests.nix;
+      # Home Manager module - with flox package injected
+      homeManagerModules.floxManifests = { pkgs, ... }: {
+        imports = [ (import ./floxManifests.nix) ];
+        config._module.args.floxPackage = flox.packages.${pkgs.system}.default or null;
+      };
       homeManagerModules.default = self.homeManagerModules.floxManifests;
 
       # Example configurations for testing

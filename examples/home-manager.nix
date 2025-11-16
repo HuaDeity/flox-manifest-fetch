@@ -37,13 +37,15 @@
   #   # Will automatically try FLOX_FLOXHUB_TOKEN env var
   # };
 
-  # Example 4: Using flox CLI (Impure - requires --impure and flox installed)
+  # Example 4: Using flox CLI (Impure - requires --impure)
+  # The module includes flox from the flake input, so it will use it automatically
   # floxManifests = {
   #   enable = true;
   #   user = "myusername";
   #   environments = [ "default" ];
-  #   floxBin = "flox";  # or "/path/to/flox"
-  #   # Will run 'flox auth token' as fallback
+  #   # Will use 'flox auth token' from flake input as fallback
+  #   # Or override with custom package:
+  #   # floxPackage = inputs.my-flox.packages.${pkgs.system}.default;
   # };
 
   # Example 5: Using ~/.config/flox/flox.toml (Impure - requires --impure)
