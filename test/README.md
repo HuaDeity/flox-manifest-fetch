@@ -1,60 +1,120 @@
 # Testing flox-manifest-fetch
 
-This directory contains test configurations for the flox-manifest-fetch module.
+This directory contains test configurations for the flox-manifest-fetch module, focusing on testing the authentication method priority order.
 
 ## Prerequisites
 
 1. A Flox account with at least one environment
-2. A Flox Hub token (get it via `flox auth token` or from `~/.config/flox/flox.toml`)
+2. A Flox Hub token
 
 ## Configuration
 
-Before running tests, edit `flake.nix` and replace:
-- `user = "flox"` with your actual Flox username
+Before running tests, edit `flake.nix` and update:
+
+```nix
+testUser = "flox";     # Replace with your Flox username
+testEnv = "default";   # Replace with your environment name
+```
+
+## Authentication Method Priority
+
+The module tests the following priority order:
+
+1. **Direct token** (`token` option) - Highest priority
+2. **Token file** (`tokenFile` option)
+3. **Environment variable** (`FLOX_FLOXHUB_TOKEN`)
+4. **Flox CLI** (`flox auth token` via `floxPackage`)
+5. **Config file** (`~/.config/flox/flox.toml`) - Lowest priority
 
 ## Running Tests
 
-### Test 1: Standalone Manifest Fetch
-
-Fetch a manifest without using the full module:
+### Setup
 
 ```bash
 cd test
-export FLOX_FLOXHUB_TOKEN="your-token-here"
-nix build .#test-manifest --impure
+export FLOX_FLOXHUB_TOKEN="$(flox auth token)"
+```
+
+### Test 1: Direct Token (Priority 1)
+
+Tests the highest priority method - direct token option.
+
+```bash
+nix build .#test-1-direct-token --impure
 cat result/manifest.toml
 cat result/generation
 ```
 
-**Expected output:**
-- `result/manifest.toml`: Your Flox environment manifest
-- `result/generation`: The generation number (e.g., "23")
+**Expected:** Fetches manifest using the token from `FLOX_FLOXHUB_TOKEN` env var passed to the `token` option.
 
-### Test 2: Home-Manager Integration
+### Test 2: Token File (Priority 2)
 
-Test the module in a home-manager configuration:
+Tests the token file method.
 
 ```bash
-cd test
-export FLOX_FLOXHUB_TOKEN="your-token-here"
-nix build .#homeConfigurations.testuser.activationPackage --impure
+nix build .#test-2-token-file --impure
+cat result/manifest.toml
 ```
 
-**Expected output:**
-- Successful build of home-manager activation package
-- Module correctly fetches and integrates manifests
+**Expected:** Fetches manifest using a token file created in the Nix store.
 
-### Test 3: Module Load Check
+### Test 3: Environment Variable (Priority 3)
 
-Verify the module can be imported without errors:
+Tests falling back to the environment variable.
 
 ```bash
-cd test
-nix build .#checks.x86_64-linux.module-loads
+nix build .#test-3-env-var --impure
+cat result/manifest.toml
 ```
 
-**Expected output:**
-- Successful build confirming module loads correctly
+**Expected:** Fetches manifest using `FLOX_FLOXHUB_TOKEN` when no higher priority methods are set.
+
+### Test 4: Flox CLI from Flake (Priority 4)
+
+Tests using the flox CLI from the flake input.
+
+```bash
+# Make sure you're logged in to flox
+flox auth login
+
+nix build .#test-4-flox-cli --impure
+cat result/manifest.toml
+```
+
+**Expected:** Fetches manifest using `flox auth token` from the flox package in the flake input.
+
+### Test 5: Priority Order
+
+Tests that higher priority methods override lower priority ones.
+
+```bash
+nix build .#test-priority --impure
+cat result/manifest.toml
+```
+
+**Expected:** Even though multiple auth methods are configured, the highest priority (direct token) is used.
+
+### Test 6: Multiple Environments
+
+Tests fetching manifests from multiple environments.
+
+```bash
+nix build .#test-multi-env --impure
+ls -la result/
+cat result/default.toml
+```
+
+**Expected:** Fetches manifests for both "default" and "development" environments (if they exist).
+
+### Test 7: Run All Tests
+
+Runs the complete test suite.
+
+```bash
+nix build .#test-all --impure
+```
+
+**Expected:** All tests pass and results are collected in the output directory.
 
 ## Development Shell
 
@@ -65,128 +125,96 @@ cd test
 nix develop
 ```
 
-This will display all available test commands.
+This will display all available test commands and usage instructions.
 
-## Testing Different Token Sources
+## Test Output
 
-### Using Direct Token (Not Recommended - Testing Only)
+Each test produces:
+- `manifest.toml` - The fetched Flox manifest
+- `generation` - The generation number
+- `test-name` - The name of the test that was run
 
-Edit `flake.nix`:
-```nix
-floxManifests = {
-  enable = true;
-  user = "your-username";
-  environments = [ "default" ];
-  token = "your-token-here";  # Visible in nix store!
-};
+## Understanding Test Results
+
+### Success
+```
+=== Test 1: Direct Token (Priority 1) ===
+Testing with: token option
+
+SUCCESS: Manifest fetched using direct token
+Generation: 23
 ```
 
-Build without `--impure`:
-```bash
-nix build .#homeConfigurations.testuser.activationPackage
+### Failure
 ```
+=== Test 1: Direct Token (Priority 1) ===
+Testing with: token option
 
-### Using Token File (Recommended)
-
-Create a token file:
-```bash
-echo "your-token" > /tmp/flox-token
-chmod 600 /tmp/flox-token
-```
-
-Edit `flake.nix`:
-```nix
-floxManifests = {
-  enable = true;
-  user = "your-username";
-  environments = [ "default" ];
-  tokenFile = /tmp/flox-token;
-};
-```
-
-Build without `--impure`:
-```bash
-nix build .#homeConfigurations.testuser.activationPackage
-```
-
-### Using Environment Variable (Impure)
-
-```bash
-export FLOX_FLOXHUB_TOKEN="your-token"
-nix build .#homeConfigurations.testuser.activationPackage --impure
-```
-
-### Using Flox CLI (Impure)
-
-Make sure you're logged in to Flox:
-```bash
-flox auth login
-```
-
-Build with `--impure`:
-```bash
-nix build .#homeConfigurations.testuser.activationPackage --impure
-```
-
-The module will automatically use `flox auth token` from the flake input.
-
-### Using Config File (Impure)
-
-Ensure `~/.config/flox/flox.toml` exists with:
-```toml
-floxhub_token = "your-token-here"
-```
-
-Build with `--impure`:
-```bash
-nix build .#homeConfigurations.testuser.activationPackage --impure
-```
-
-## Testing Multiple Environments
-
-Edit `flake.nix`:
-```nix
-floxManifests = {
-  enable = true;
-  user = "your-username";
-  environments = [ "default" "development" "production" ];
-  tokenFile = /tmp/flox-token;
-};
-```
-
-Access different manifests:
-```nix
-home.file."default.toml".source = "${config.floxManifests.manifests.default}/manifest.toml";
-home.file."dev.toml".source = "${config.floxManifests.manifests.development}/manifest.toml";
-home.file."prod.toml".source = "${config.floxManifests.manifests.production}/manifest.toml";
+FAILED: Manifest not found
 ```
 
 ## Troubleshooting
 
 ### Error: "Could not resolve Flox token"
 
-Make sure you've set at least one token source (see above).
+Make sure you've set `FLOX_FLOXHUB_TOKEN`:
+```bash
+export FLOX_FLOXHUB_TOKEN="$(flox auth token)"
+```
 
 ### Error: "No generation directories found"
 
-- Check that the environment name exists in your Flox account
-- Verify your token has access to the environment
-- Ensure the username is correct
-
-### Error: "Manifest not found at..."
-
-The environment exists but doesn't have a valid manifest. Check your Flox environment.
+- Verify `testUser` matches your Flox username
+- Verify `testEnv` exists in your Flox account
+- Check your token has access to the environment
 
 ### Build hangs or is slow
 
 The first build will:
-1. Fetch the flox package (if using CLI fallback)
+1. Fetch the flox package from the flake input
 2. Clone the floxmeta repository
-3. Cache is created for subsequent builds
+3. Create cache for subsequent builds
+
+Subsequent builds will be much faster.
+
+## Module Evaluation
+
+The tests use `lib.evalModules` to evaluate the floxManifests module directly:
+
+```nix
+evalModule = config:
+  lib.evalModules {
+    modules = [
+      flox-manifest-fetch.nixosModules.default
+      {
+        _module.args = {
+          inherit pkgs;
+          floxPackage = flox-manifest-fetch.inputs.flox.packages.${system}.default;
+        };
+      }
+      config
+    ];
+  };
+```
+
+This allows testing the module without using NixOS or home-manager.
+
+## What Each Test Validates
+
+| Test | Validates | Auth Method |
+|------|-----------|-------------|
+| test-1-direct-token | Highest priority | `token` option |
+| test-2-token-file | Second priority | `tokenFile` option |
+| test-3-env-var | Third priority | `FLOX_FLOXHUB_TOKEN` env var |
+| test-4-flox-cli | Fourth priority | `floxPackage` with flox CLI |
+| test-priority | Priority override | Multiple methods |
+| test-multi-env | Multiple envs | Any method |
+| test-all | Complete suite | All methods |
 
 ## Cleanup
 
 Remove build artifacts:
+
 ```bash
 cd test
 rm -rf result result-*

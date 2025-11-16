@@ -330,16 +330,34 @@ nix-build examples/standalone.nix --impure
 
 ## Testing
 
-See the [`test/`](./test/) directory for comprehensive test configurations:
+See the [`test/`](./test/) directory for comprehensive test configurations that test the authentication method priority order:
 
 ```bash
 cd test
-export FLOX_FLOXHUB_TOKEN="your-token"
-nix build .#test-manifest --impure
+
+# Update test/flake.nix with your username first
+# testUser = "your-username"
+# testEnv = "your-environment"
+
+# Run individual tests
+export FLOX_FLOXHUB_TOKEN="$(flox auth token)"
+nix build .#test-1-direct-token --impure  # Test priority 1
+nix build .#test-2-token-file --impure    # Test priority 2
+nix build .#test-3-env-var --impure       # Test priority 3
+nix build .#test-4-flox-cli --impure      # Test priority 4
+nix build .#test-priority --impure        # Test priority order
+
+# Or run all tests
+nix build .#test-all --impure
+
+# Check results
 cat result/manifest.toml
+cat result/generation
 ```
 
-See [test/README.md](./test/README.md) for detailed testing instructions.
+The tests use `lib.evalModules` to evaluate the module directly without requiring NixOS or home-manager.
+
+See [test/README.md](./test/README.md) for detailed testing instructions and expected outputs.
 
 ## Examples
 
