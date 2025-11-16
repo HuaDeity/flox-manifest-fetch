@@ -1,21 +1,33 @@
 # flox-manifest-fetch
 
-A Nix module for fetching Flox environment manifests from FloxHub. This module integrates with NixOS and home-manager to automatically fetch and manage Flox `manifest.toml` files.
+A Nix module for fetching Flox environment manifests from FloxHub with a clean separation between fetching and usage.
 
 ## Features
 
-- 🔐 **Multiple token sources**: Direct token, token file, environment variables, Flox CLI, or config file
-- ✨ **Pure by default**: Use token or tokenFile for pure Nix evaluation
-- 🔄 **Automatic fallback**: Tries multiple token sources in order
-- 📦 **Multi-environment**: Fetch manifests from multiple Flox environments
-- 🏠 **Home-manager & NixOS**: Works with both configuration systems
-- 🔒 **Secrets-friendly**: Integrates with sops-nix, agenix, etc.
-- 🚀 **Flox included**: Flox CLI included as flake input (no separate installation needed)
-- 📚 **Flox nixpkgs**: Uses `github:flox/nixpkgs/stable` for better Flox compatibility
+- ✨ **Pure Nix evaluation** - No `--impure` flag required for builds
+- 📦 **Two-step workflow** - Fetch once, use everywhere
+- 🔐 **Flexible authentication** - Token file, env var, flox CLI, or config file
+- 🏠 **NixOS & home-manager** - Works with both configuration systems
+- 🔄 **Multi-environment** - Fetch manifests from multiple Flox environments
+- 🎯 **Simple & clean** - Explicit control over when manifests update
+- 📚 **Flox nixpkgs** - Uses `github:flox/nixpkgs/stable` for compatibility
+
+## Architecture
+
+This module uses a **two-step workflow** that separates impure operations from pure Nix evaluation:
+
+1. **Fetch** (impure, run manually): `fetch-manifests` script downloads manifests to local cache
+2. **Use** (pure, in Nix configs): Module reads manifests from cache directory
+
+This approach:
+- Eliminates the need for `--impure` in your system rebuilds
+- Gives you explicit control over when manifests update
+- Works perfectly with pure Nix evaluation
+- Follows Nix best practices
 
 ## Quick Start
 
-### Add to your flake
+### Step 1: Add to your flake
 
 ```nix
 {
@@ -25,7 +37,6 @@ A Nix module for fetching Flox environment manifests from FloxHub. This module i
   };
 
   outputs = { self, nixpkgs, flox-manifest-fetch, ... }: {
-    # NixOS configuration
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
       modules = [
         flox-manifest-fetch.nixosModules.default
@@ -34,28 +45,35 @@ A Nix module for fetching Flox environment manifests from FloxHub. This module i
             enable = true;
             user = "myusername";
             environments = [ "default" ];
-            tokenFile = /run/secrets/flox-token;
+            cacheDir = ./flox-manifests;  # Point to local cache
           };
-        }
-      ];
-    };
 
-    # home-manager configuration
-    homeConfigurations.myuser = home-manager.lib.homeManagerConfiguration {
-      modules = [
-        flox-manifest-fetch.homeManagerModules.default
-        {
-          floxManifests = {
-            enable = true;
-            user = "myusername";
-            environments = [ "default" ];
-            tokenFile = /run/secrets/flox-token;
-          };
+          # Use the manifests
+          environment.etc."my-flox-manifest.toml".source =
+            config.floxManifests.manifests.default + "/manifest.toml";
         }
       ];
     };
   };
 }
+```
+
+### Step 2: Fetch manifests
+
+```bash
+# From your project directory
+nix run github:yourusername/flox-manifest-fetch#fetch-manifests -- \
+  --user myusername \
+  --envs default
+
+# This creates ./flox-manifests/ with your manifests
+```
+
+### Step 3: Build your system (pure!)
+
+```bash
+nixos-rebuild switch --flake .#myhost
+# No --impure flag needed!
 ```
 
 ## Configuration Options
@@ -63,308 +81,364 @@ A Nix module for fetching Flox environment manifests from FloxHub. This module i
 ### `floxManifests.enable`
 - **Type**: `boolean`
 - **Default**: `false`
-- **Description**: Enable the Flox manifest fetcher
+- **Description**: Enable Flox manifest management
 
 ### `floxManifests.user`
 - **Type**: `string`
 - **Required**: Yes
 - **Example**: `"myusername"`
-- **Description**: Flox owner/username for the floxmeta repository
+- **Description**: Flox username for accessing FloxHub
 
 ### `floxManifests.environments`
 - **Type**: `list of strings`
-- **Default**: `[ "default" ]`
+- **Default**: `[]`
 - **Example**: `[ "default" "development" "production" ]`
-- **Description**: List of environment names (git branches) to fetch manifests from
+- **Description**: List of Flox environments to load manifests for
 
-### `floxManifests.token`
-- **Type**: `null or string`
-- **Default**: `null`
-- **Description**: Flox Hub token (highest priority, but visible in Nix store)
+### `floxManifests.cacheDir`
+- **Type**: `path`
+- **Default**: `./.flox-manifests`
+- **Example**: `./flox-manifests` or `/etc/flox-manifests`
+- **Description**: Directory where `fetch-manifests` stores cached manifests
 
-### `floxManifests.tokenFile`
+### `floxManifests.manifests`
+- **Type**: `attribute set of packages` (read-only)
+- **Description**: Derivations containing manifest.toml files, keyed by environment name
+
+### `floxManifests.outputPath`
 - **Type**: `null or path`
 - **Default**: `null`
-- **Example**: `"/run/secrets/flox-token"`
-- **Description**: Path to file containing Flox Hub token (recommended for secrets)
+- **Example**: `"/etc/flox/manifests"`
+- **Description**: Optional path to copy all manifests to (NixOS only)
 
-### `floxManifests.floxPackage`
-- **Type**: `null or package`
-- **Default**: `flox.packages.${system}.default` (from flake input)
-- **Description**: Flox package to use for `flox auth token` command (used in fallback chain)
+## Usage
 
-### `floxManifests.floxBin`
-- **Type**: `string`
-- **Default**: `"flox"`
-- **Example**: `"/home/user/.nix-profile/bin/flox"`
-- **Description**: Flox binary path or name (fallback if floxPackage is not available)
+### Fetching Manifests
 
-### `floxManifests.manifests` (read-only)
-- **Type**: `attribute set of derivations`
-- **Description**: Output containing derivations with manifest.toml files
+The `fetch-manifests` script downloads manifests from FloxHub to a local cache directory.
 
-## Token Resolution
+#### Using command-line arguments:
 
-The module tries the following sources in order:
-
-1. **`token` option** (Pure) - Direct token value
-2. **`tokenFile` option** (Pure) - Read from file
-3. **`FLOX_FLOXHUB_TOKEN` env var** (Impure) - Requires `--impure` flag
-4. **`flox auth token` CLI** (Impure) - Requires `--impure`
-   - Uses `floxPackage` option (defaults to flox from flake input)
-   - Falls back to `floxBin` if floxPackage not available
-5. **`~/.config/flox/flox.toml`** (Impure) - Requires `--impure`
-
-**Note**: The module includes flox as a flake input, so you don't need to install flox separately to use the CLI fallback.
-
-### Pure vs Impure
-
-**Pure evaluation** (options 1-2):
 ```bash
-nixos-rebuild switch
-home-manager switch
+nix run .#fetch-manifests -- --user myuser --envs default,development
 ```
 
-**Impure evaluation** (options 3-5):
+#### Using environment variables:
+
 ```bash
-nixos-rebuild switch --impure
-home-manager switch --impure
+export FLOX_USER=myuser
+export FLOX_ENVS=default,development
+nix run .#fetch-manifests
 ```
 
-## Usage Examples
+#### Custom cache directory:
 
-### Home Manager
+```bash
+nix run .#fetch-manifests -- \
+  --user myuser \
+  --envs default \
+  --cache-dir /etc/flox-manifests
+```
+
+#### Options:
+
+- `--user USER` - Flox username (required)
+- `--envs ENV1,ENV2` - Comma-separated list of environments (required)
+- `--cache-dir DIR` - Cache directory (default: `.flox-manifests`)
+- `--token TOKEN` - FloxHub token (optional, see authentication below)
+- `--help` - Show help message
+
+### Authentication
+
+The fetch script tries these methods in order:
+
+1. `--token` command-line argument
+2. `FLOX_FLOXHUB_TOKEN` environment variable
+3. `flox auth token` command (if flox is available)
+4. `~/.config/flox/flox.toml` config file
+
+Example:
+
+```bash
+# Using environment variable
+export FLOX_FLOXHUB_TOKEN="$(flox auth token)"
+nix run .#fetch-manifests -- --user myuser --envs default
+
+# Using flox CLI (automatic)
+flox auth login
+nix run .#fetch-manifests -- --user myuser --envs default
+```
+
+### Using Manifests in NixOS
 
 ```nix
 { config, ... }:
+
 {
+  imports = [ flox-manifest-fetch.nixosModules.default ];
+
   floxManifests = {
     enable = true;
     user = "myusername";
-    environments = [ "default" "development" ];
-    tokenFile = /run/secrets/flox-token;
+    environments = [ "default" "production" ];
+    cacheDir = ./flox-manifests;
   };
 
-  # Copy manifest to home directory
-  home.file."my-manifest.toml".source =
-    "${config.floxManifests.manifests.default}/manifest.toml";
+  # Copy manifest to /etc
+  environment.etc."flox-default.toml".source =
+    config.floxManifests.manifests.default + "/manifest.toml";
 
-  # Use manifest generation number
-  home.sessionVariables.FLOX_GEN =
-    builtins.readFile "${config.floxManifests.manifests.default}/generation";
+  # Read generation number
+  environment.sessionVariables.FLOX_GEN =
+    builtins.readFile (config.floxManifests.manifests.default + "/generation");
 }
 ```
 
-### NixOS
+### Using Manifests in home-manager
 
 ```nix
-{ config, pkgs, lib, ... }:
+{ config, ... }:
+
 {
-  floxManifests = {
-    enable = true;
-    user = "myorganization";
-    environments = [ "production" ];
-    tokenFile = "/run/secrets/flox-token";
-  };
-
-  # Create system file
-  environment.etc."flox/manifest.toml".source =
-    "${config.floxManifests.manifests.production}/manifest.toml";
-
-  # Parse and use manifest
-  environment.systemPackages =
-    let
-      manifest = lib.importTOML
-        "${config.floxManifests.manifests.production}/manifest.toml";
-    in
-    # Use manifest data...
-    [ pkgs.hello ];
-}
-```
-
-### With sops-nix
-
-```nix
-{
-  sops.secrets.flox-token = {
-    sopsFile = ./secrets.yaml;
-  };
+  imports = [ flox-manifest-fetch.homeManagerModules.default ];
 
   floxManifests = {
     enable = true;
     user = "myusername";
     environments = [ "default" ];
-    tokenFile = config.sops.secrets.flox-token.path;
+    cacheDir = ./flox-manifests;
+  };
+
+  # Copy manifest to home directory
+  home.file."my-manifest.toml".source =
+    config.floxManifests.manifests.default + "/manifest.toml";
+
+  # Parse and use manifest content
+  home.sessionVariables =
+    let
+      manifest = pkgs.lib.importTOML
+        (config.floxManifests.manifests.default + "/manifest.toml");
+    in {
+      FLOX_ENV_NAME = manifest.hook.on-activate or "default";
+    };
+}
+```
+
+## Cache Directory Structure
+
+After running `fetch-manifests`, your cache directory will look like:
+
+```
+.flox-manifests/
+├── default/
+│   ├── manifest.toml     # The manifest file
+│   └── generation        # Generation number
+├── development/
+│   ├── manifest.toml
+│   └── generation
+└── production/
+    ├── manifest.toml
+    └── generation
+```
+
+You can:
+- **Commit to git**: Share manifests with your team
+- **Add to .gitignore**: Fetch fresh each time
+- **Mix both**: Commit stable envs, gitignore experimental ones
+
+## Workflow Examples
+
+### Daily Development
+
+```bash
+# Morning: Update manifests if needed
+nix run .#fetch-manifests -- --user myuser --envs default
+
+# Use throughout the day (pure builds)
+nixos-rebuild switch
+home-manager switch
+nix build .#mypackage
+```
+
+### CI/CD
+
+```yaml
+# .github/workflows/build.yml
+steps:
+  - name: Fetch Flox manifests
+    run: |
+      nix run .#fetch-manifests -- \
+        --user ${{ secrets.FLOX_USER }} \
+        --envs default \
+        --token ${{ secrets.FLOX_TOKEN }}
+
+  - name: Build system (pure)
+    run: nixos-rebuild build --flake .#myhost
+```
+
+### Git Hooks
+
+```bash
+# .git/hooks/post-merge
+#!/usr/bin/env bash
+# Auto-fetch manifests after pulling
+nix run .#fetch-manifests -- --user myuser --envs default
+```
+
+### Multiple Users
+
+```nix
+{
+  floxManifests = {
+    enable = true;
+    user = "team";
+    environments = [ "shared-dev" "shared-prod" ];
+    cacheDir = /etc/flox-team-manifests;
+  };
+}
+```
+
+Then fetch to system location:
+```bash
+sudo nix run .#fetch-manifests -- \
+  --user team \
+  --envs shared-dev,shared-prod \
+  --cache-dir /etc/flox-team-manifests
+```
+
+## Updating Manifests
+
+When your Flox environments change:
+
+```bash
+# Re-fetch manifests
+nix run .#fetch-manifests -- --user myuser --envs default
+
+# Rebuild to use updated manifests
+nixos-rebuild switch
+```
+
+The module will automatically use the freshly fetched manifests.
+
+## Secrets Management
+
+### With sops-nix
+
+```nix
+{
+  # Store token in encrypted secrets
+  sops.secrets.flox-token = {
+    sopsFile = ./secrets.yaml;
+  };
+
+  # Use in activation script to fetch manifests
+  system.activationScripts.fetchFloxManifests = ''
+    export FLOX_FLOXHUB_TOKEN=$(cat ${config.sops.secrets.flox-token.path})
+    ${pkgs.flox-manifest-fetch}/bin/fetch-manifests \
+      --user myuser \
+      --envs default \
+      --cache-dir /var/lib/flox-manifests
+  '';
+
+  floxManifests = {
+    enable = true;
+    user = "myuser";
+    environments = [ "default" ];
+    cacheDir = /var/lib/flox-manifests;
   };
 }
 ```
 
 ### With agenix
 
-```nix
-{
-  age.secrets.flox-token.file = ./secrets/flox-token.age;
+Similar approach using age-encrypted secrets.
 
-  floxManifests = {
-    enable = true;
-    user = "myusername";
-    environments = [ "default" ];
-    tokenFile = config.age.secrets.flox-token.path;
-  };
-}
-```
+## Development
 
-### Standalone (without NixOS/home-manager)
+### Running Tests
 
 ```bash
-export FLOX_FLOXHUB_TOKEN="your-token"
-nix-build examples/standalone.nix --impure
-cat result/manifest.toml
+# Fetch test manifests
+nix run .#fetch-manifests -- --user flox --envs default
+
+# Run tests (pure!)
+cd test
+nix build .#test-basic
+nix build .#test-multi-env
+nix build .#test-all
 ```
 
-### Using flox CLI for token
+See [test/README.md](test/README.md) for detailed testing documentation.
 
-The module includes flox from the flake input, so it will automatically use it:
+### Development Shell
 
-```nix
-{
-  floxManifests = {
-    enable = true;
-    user = "myusername";
-    environments = [ "default" ];
-    # Will automatically use 'flox auth token' from flake input as fallback
-  };
-}
-```
-
-Then build with:
 ```bash
-home-manager switch --impure
+nix develop
+# or
+nix develop ./test
 ```
 
-### Using a custom flox package
+## Troubleshooting
 
-If you want to use a different version of flox:
+### Error: "Manifest cache not found for environment 'default'"
 
+Run the fetch script first:
+```bash
+nix run .#fetch-manifests -- --user YOUR_USER --envs default
+```
+
+### Error: "FLOX_USER is required"
+
+The fetch script needs to know your Flox username:
+```bash
+nix run .#fetch-manifests -- --user myuser --envs default
+```
+
+### Manifests not updating
+
+Re-run the fetch script:
+```bash
+nix run .#fetch-manifests -- --user myuser --envs default
+```
+
+### Cache directory location
+
+The module looks for manifests in `cacheDir`:
 ```nix
-{
-  inputs.my-flox.url = "github:flox/flox/v1.2.3";
+floxManifests.cacheDir = ./flox-manifests;  # Relative to flake
+floxManifests.cacheDir = /etc/flox-manifests;  # Absolute path
+```
 
-  outputs = { flox-manifest-fetch, my-flox, ... }: {
-    homeConfigurations.user = {
-      floxManifests = {
-        enable = true;
-        user = "myusername";
-        environments = [ "default" ];
-        floxPackage = my-flox.packages.${pkgs.system}.default;
-      };
-    };
-  };
-}
+Ensure the fetch script writes to the same location:
+```bash
+nix run .#fetch-manifests -- \
+  --cache-dir ./flox-manifests \
+  --user myuser \
+  --envs default
 ```
 
 ## How It Works
 
-1. **Authentication**: Resolves Flox Hub token from configured sources
-2. **Fetching**: Uses `builtins.fetchGit` to fetch the floxmeta repository for each environment:
-   ```nix
-   builtins.fetchGit {
-     url = "https://oauth:<token>@api.flox.dev/git/<user>/floxmeta";
-     ref = environment;
-   }
-   ```
-3. **Generation Discovery**: Uses `builtins.readDir` and Nix builtins to find the latest generation (highest numbered directory)
-4. **Extraction**: Copies `manifest.toml` from `<generation>/env/manifest.toml` to the output
-5. **Output**: Creates a derivation containing the manifest file and generation number
+1. **Fetching (impure)**:
+   - `fetch-manifests` script clones floxmeta repo from FloxHub
+   - Finds latest generation (highest numbered directory)
+   - Extracts `manifest.toml` to local cache
+   - All impure operations happen here
 
-## Output Structure
+2. **Using (pure)**:
+   - Nix module reads from local cache using `builtins.pathExists`
+   - Creates derivations that copy manifests to Nix store
+   - No network access, no impure evaluation
+   - Fast and deterministic
 
-Each manifest derivation contains:
-```
-$out/
-├── manifest.toml    # The Flox manifest file
-└── generation       # The generation number (e.g., "23")
-```
+## Comparison with Previous Approaches
 
-## Security Considerations
-
-- **Token visibility**: Using `token` option stores the token in the Nix store (world-readable)
-- **Recommended**: Use `tokenFile` with a secrets management solution
-- **Network access**: The module requires network access during evaluation (via `builtins.fetchGit`)
-- **Token in URL**: Token is embedded in the git URL but not stored in derivation outputs
-
-## Troubleshooting
-
-### Error: "Could not resolve Flox token"
-
-Make sure you've set one of:
-- `floxManifests.token`
-- `floxManifests.tokenFile`
-- `FLOX_FLOXHUB_TOKEN` environment variable (with `--impure`)
-- `~/.config/flox/flox.toml` with `floxhub_token` (with `--impure`)
-- Working `flox` CLI installation (with `--impure`)
-
-### Error: "No generation directories found"
-
-The environment name doesn't exist or is empty. Check:
-- The environment name matches a branch in your floxmeta repo
-- You have access to the environment with your token
-
-### Build fails with network errors
-
-Ensure you have network access during Nix evaluation. `builtins.fetchGit` requires network connectivity to fetch the repository.
-
-## Development
-
-```bash
-# Enter development shell
-nix develop
-
-# Format Nix files
-nixpkgs-fmt .
-
-# Test with an example
-export FLOX_FLOXHUB_TOKEN="your-token"
-nix-build examples/standalone.nix --impure
-```
-
-## Testing
-
-See the [`test/`](./test/) directory for comprehensive test configurations that test the authentication method priority order:
-
-```bash
-cd test
-
-# Update test/flake.nix with your username first
-# testUser = "your-username"
-# testEnv = "your-environment"
-
-# Run individual tests
-export FLOX_FLOXHUB_TOKEN="$(flox auth token)"
-nix build .#test-1-direct-token --impure  # Test priority 1
-nix build .#test-2-token-file --impure    # Test priority 2
-nix build .#test-3-env-var --impure       # Test priority 3
-nix build .#test-4-flox-cli --impure      # Test priority 4
-nix build .#test-priority --impure        # Test priority order
-
-# Or run all tests
-nix build .#test-all --impure
-
-# Check results
-cat result/manifest.toml
-cat result/generation
-```
-
-The tests use `lib.evalModules` to evaluate the module directly without requiring NixOS or home-manager.
-
-See [test/README.md](./test/README.md) for detailed testing instructions and expected outputs.
-
-## Examples
-
-See the [`examples/`](./examples/) directory for complete examples:
-- [`home-manager.nix`](./examples/home-manager.nix) - Home Manager integration
-- [`nixos.nix`](./examples/nixos.nix) - NixOS integration
-- [`standalone.nix`](./examples/standalone.nix) - Standalone usage
+| Approach | Pure Eval | Network at Build | Caching | User Control |
+|----------|-----------|------------------|---------|--------------|
+| builtins.fetchGit | ❌ No | ✅ Yes | ✅ Yes | ❌ No |
+| FOD | ✅ Yes | ✅ Yes | ⚠️ Flaky | ❌ No |
+| __impure flag | ❌ No | ✅ Yes | ❌ No | ❌ No |
+| **Two-step (this)** | ✅ Yes | ❌ No | ✅ Yes | ✅ Yes |
 
 ## License
 
@@ -372,10 +446,4 @@ MIT
 
 ## Contributing
 
-Contributions welcome! Please open an issue or pull request.
-
-## Related Projects
-
-- [Flox](https://github.com/flox/flox) - Developer environments you can take with you
-- [home-manager](https://github.com/nix-community/home-manager) - Manage user environments with Nix
-- [sops-nix](https://github.com/Mic92/sops-nix) - Secrets management with Nix
+Contributions welcome! Please open an issue or PR.

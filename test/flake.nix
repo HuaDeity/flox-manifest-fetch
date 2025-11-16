@@ -12,276 +12,159 @@
       pkgs = flox-manifest-fetch.inputs.nixpkgs.legacyPackages.${system};
       lib = pkgs.lib;
 
+      # Test configuration - UPDATE THESE VALUES
+      testUser = "flox";  # Replace with your Flox username
+      testEnv = "default";  # Replace with your environment name
+      cacheDir = ./.flox-manifests;  # Where fetch-manifests will store manifests
+
       # Helper to evaluate the module with specific config
       evalModule = config:
         lib.evalModules {
           modules = [
             flox-manifest-fetch.nixosModules.default
             {
-              _module.args = {
-                inherit pkgs;
-                floxPackage = flox-manifest-fetch.inputs.flox.packages.${system}.default or null;
-              };
+              _module.args = { inherit pkgs; };
             }
             config
           ];
         };
 
-      # Test configuration - UPDATE THESE VALUES
-      testUser = "flox";  # Replace with your Flox username
-      testEnv = "default";  # Replace with your environment name
-
     in
     {
       packages.${system} = {
-        # Test 1: Direct token (highest priority)
-        # Usage: nix build .#test-1-direct-token --impure
-        test-1-direct-token =
+        # Test 1: Basic manifest reading from cache
+        # Prerequisites:
+        #   1. Run: nix run ..#fetch-manifests -- --user flox --envs default
+        #   2. This creates .flox-manifests/default/manifest.toml
+        # Usage: nix build .#test-basic
+        test-basic =
           let
-            token = builtins.getEnv "FLOX_FLOXHUB_TOKEN";
             config = evalModule {
               floxManifests = {
                 enable = true;
                 user = testUser;
                 environments = [ testEnv ];
-                token = token;  # Method 1: Direct token
+                cacheDir = cacheDir;
               };
             };
             manifest = config.config.floxManifests.manifests.${testEnv};
           in
-          pkgs.runCommand "test-1-direct-token" {
+          pkgs.runCommand "test-basic" {
             inherit manifest;
           } ''
-            echo "=== Test 1: Direct Token (Priority 1) ==="
-            echo "Testing with: token option"
+            echo "=== Test: Basic Manifest Reading ==="
+            echo "User: ${testUser}"
+            echo "Environment: ${testEnv}"
             echo ""
 
             if [ ! -f "${manifest}/manifest.toml" ]; then
               echo "FAILED: Manifest not found"
+              echo "Did you run 'nix run ..#fetch-manifests -- --user ${testUser} --envs ${testEnv}' first?"
               exit 1
             fi
 
-            echo "SUCCESS: Manifest fetched using direct token"
+            echo "SUCCESS: Manifest loaded from cache"
             echo "Generation: $(cat ${manifest}/generation)"
-
-            mkdir -p $out
-            cp ${manifest}/manifest.toml $out/
-            cp ${manifest}/generation $out/
-            echo "test-1-direct-token" > $out/test-name
-          '';
-
-        # Test 2: Token file (priority 2)
-        # Usage:
-        #   echo "your-token" > /tmp/flox-test-token
-        #   nix build .#test-2-token-file
-        test-2-token-file =
-          let
-            tokenFile = pkgs.writeText "test-token" (builtins.getEnv "FLOX_FLOXHUB_TOKEN");
-            config = evalModule {
-              floxManifests = {
-                enable = true;
-                user = testUser;
-                environments = [ testEnv ];
-                # token = null;  # Not set - testing priority
-                tokenFile = tokenFile;  # Method 2: Token file
-              };
-            };
-            manifest = config.config.floxManifests.manifests.${testEnv};
-          in
-          pkgs.runCommand "test-2-token-file" {
-            inherit manifest tokenFile;
-          } ''
-            echo "=== Test 2: Token File (Priority 2) ==="
-            echo "Testing with: tokenFile option"
-            echo "Token file: ${tokenFile}"
             echo ""
 
-            if [ ! -f "${manifest}/manifest.toml" ]; then
-              echo "FAILED: Manifest not found"
-              exit 1
-            fi
-
-            echo "SUCCESS: Manifest fetched using token file"
-            echo "Generation: $(cat ${manifest}/generation)"
-
             mkdir -p $out
             cp ${manifest}/manifest.toml $out/
             cp ${manifest}/generation $out/
-            echo "test-2-token-file" > $out/test-name
+            echo "test-basic" > $out/test-name
+
+            echo "Manifest preview:"
+            head -20 ${manifest}/manifest.toml
           '';
 
-        # Test 3: Environment variable (priority 3)
-        # Usage:
-        #   export FLOX_FLOXHUB_TOKEN="your-token"
-        #   nix build .#test-3-env-var --impure
-        test-3-env-var =
-          let
-            config = evalModule {
-              floxManifests = {
-                enable = true;
-                user = testUser;
-                environments = [ testEnv ];
-                # token = null;
-                # tokenFile = null;
-                # Will use FLOX_FLOXHUB_TOKEN env var - Method 3
-              };
-            };
-            manifest = config.config.floxManifests.manifests.${testEnv};
-          in
-          pkgs.runCommand "test-3-env-var" {
-            inherit manifest;
-          } ''
-            echo "=== Test 3: Environment Variable (Priority 3) ==="
-            echo "Testing with: FLOX_FLOXHUB_TOKEN env var"
-            echo ""
-
-            if [ ! -f "${manifest}/manifest.toml" ]; then
-              echo "FAILED: Manifest not found"
-              exit 1
-            fi
-
-            echo "SUCCESS: Manifest fetched using env var"
-            echo "Generation: $(cat ${manifest}/generation)"
-
-            mkdir -p $out
-            cp ${manifest}/manifest.toml $out/
-            cp ${manifest}/generation $out/
-            echo "test-3-env-var" > $out/test-name
-          '';
-
-        # Test 4: Flox CLI from flake input (priority 4)
-        # Usage:
-        #   flox auth login
-        #   nix build .#test-4-flox-cli --impure
-        test-4-flox-cli =
-          let
-            config = evalModule {
-              floxManifests = {
-                enable = true;
-                user = testUser;
-                environments = [ testEnv ];
-                # token = null;
-                # tokenFile = null;
-                # FLOX_FLOXHUB_TOKEN not set (if testing priority)
-                # Will use floxPackage - Method 4
-                floxPackage = flox-manifest-fetch.inputs.flox.packages.${system}.default;
-              };
-            };
-            manifest = config.config.floxManifests.manifests.${testEnv};
-          in
-          pkgs.runCommand "test-4-flox-cli" {
-            inherit manifest;
-          } ''
-            echo "=== Test 4: Flox CLI from Flake Input (Priority 4) ==="
-            echo "Testing with: floxPackage option"
-            echo ""
-
-            if [ ! -f "${manifest}/manifest.toml" ]; then
-              echo "FAILED: Manifest not found"
-              exit 1
-            fi
-
-            echo "SUCCESS: Manifest fetched using flox CLI from flake"
-            echo "Generation: $(cat ${manifest}/generation)"
-
-            mkdir -p $out
-            cp ${manifest}/manifest.toml $out/
-            cp ${manifest}/generation $out/
-            echo "test-4-flox-cli" > $out/test-name
-          '';
-
-        # Test Priority: Test that higher priority methods override lower ones
-        # Usage:
-        #   export FLOX_FLOXHUB_TOKEN="your-token"
-        #   nix build .#test-priority --impure
-        test-priority =
-          let
-            directToken = builtins.getEnv "FLOX_FLOXHUB_TOKEN";
-            tokenFile = pkgs.writeText "test-token-file" directToken;
-
-            # Even though we set both token and tokenFile, token should win
-            config = evalModule {
-              floxManifests = {
-                enable = true;
-                user = testUser;
-                environments = [ testEnv ];
-                token = directToken;  # Priority 1
-                tokenFile = tokenFile;  # Priority 2 (should be ignored)
-                # env var also available but should be ignored
-              };
-            };
-            manifest = config.config.floxManifests.manifests.${testEnv};
-          in
-          pkgs.runCommand "test-priority" {
-            inherit manifest;
-          } ''
-            echo "=== Test Priority: Token > TokenFile > Env Var ==="
-            echo "Set: token (priority 1), tokenFile (priority 2), env var (priority 3)"
-            echo "Expected: token should be used"
-            echo ""
-
-            if [ ! -f "${manifest}/manifest.toml" ]; then
-              echo "FAILED: Manifest not found"
-              exit 1
-            fi
-
-            echo "SUCCESS: Priority test passed - token was used"
-            echo "Generation: $(cat ${manifest}/generation)"
-
-            mkdir -p $out
-            cp ${manifest}/manifest.toml $out/
-            cp ${manifest}/generation $out/
-            echo "test-priority" > $out/test-name
-          '';
-
-        # Test Multiple Environments
-        # Usage:
-        #   export FLOX_FLOXHUB_TOKEN="your-token"
-        #   nix build .#test-multi-env --impure
+        # Test 2: Multiple environments
+        # Prerequisites: nix run ..#fetch-manifests -- --user flox --envs default,development
+        # Usage: nix build .#test-multi-env
         test-multi-env =
           let
             config = evalModule {
               floxManifests = {
                 enable = true;
                 user = testUser;
-                environments = [ testEnv "development" ];  # Add more environments
+                environments = [ testEnv "development" ];
+                cacheDir = cacheDir;
               };
             };
             manifests = config.config.floxManifests.manifests;
           in
           pkgs.runCommand "test-multi-env" {
-            defaultManifest = manifests.${testEnv};
-            # devManifest = manifests.development or null;
+            defaultManifest = manifests.${testEnv} or null;
+            devManifest = manifests.development or null;
           } ''
-            echo "=== Test Multiple Environments ==="
-            echo "Testing: ${testEnv}, development"
+            echo "=== Test: Multiple Environments ==="
+            echo "Environments: ${testEnv}, development"
             echo ""
 
             mkdir -p $out
 
-            if [ -f "$defaultManifest/manifest.toml" ]; then
-              echo "✓ ${testEnv} manifest found"
+            if [ -n "$defaultManifest" ] && [ -f "$defaultManifest/manifest.toml" ]; then
+              echo "✓ ${testEnv} manifest loaded"
               cp $defaultManifest/manifest.toml $out/${testEnv}.toml
               echo "  Generation: $(cat $defaultManifest/generation)"
             else
-              echo "✗ ${testEnv} manifest NOT found"
+              echo "✗ ${testEnv} manifest NOT loaded"
             fi
 
-            # Note: development might not exist, so we don't fail if it's missing
+            if [ -n "$devManifest" ] && [ -f "$devManifest/manifest.toml" ]; then
+              echo "✓ development manifest loaded"
+              cp $devManifest/manifest.toml $out/development.toml
+              echo "  Generation: $(cat $devManifest/generation)"
+            else
+              echo "✗ development manifest NOT loaded (may not exist)"
+            fi
+
             echo ""
             echo "SUCCESS: Multi-environment test completed"
             echo "test-multi-env" > $out/test-name
           '';
 
-        # Complete test suite
+        # Test 3: Custom cache directory
         # Usage:
-        #   export FLOX_FLOXHUB_TOKEN="your-token"
-        #   nix build .#test-all --impure
+        #   FLOX_CACHE_DIR=/tmp/my-cache nix run ..#fetch-manifests -- --user flox --envs default
+        #   nix build .#test-custom-cache --impure
+        test-custom-cache =
+          let
+            customCache = /tmp/flox-test-cache;
+            config = evalModule {
+              floxManifests = {
+                enable = true;
+                user = testUser;
+                environments = [ testEnv ];
+                cacheDir = customCache;
+              };
+            };
+            manifest = config.config.floxManifests.manifests.${testEnv};
+          in
+          pkgs.runCommand "test-custom-cache" {
+            inherit manifest;
+          } ''
+            echo "=== Test: Custom Cache Directory ==="
+            echo "Cache directory: ${toString customCache}"
+            echo ""
+
+            if [ ! -f "${manifest}/manifest.toml" ]; then
+              echo "FAILED: Manifest not found in custom cache"
+              exit 1
+            fi
+
+            echo "SUCCESS: Manifest loaded from custom cache directory"
+            echo "Generation: $(cat ${manifest}/generation)"
+
+            mkdir -p $out
+            cp ${manifest}/manifest.toml $out/
+            cp ${manifest}/generation $out/
+            echo "test-custom-cache" > $out/test-name
+          '';
+
+        # Complete test suite
+        # Usage: nix build .#test-all
         test-all = pkgs.runCommand "test-all" {
-          test1 = self.packages.${system}.test-1-direct-token;
-          test2 = self.packages.${system}.test-2-token-file;
-          test3 = self.packages.${system}.test-3-env-var;
-          testPriority = self.packages.${system}.test-priority;
+          test1 = self.packages.${system}.test-basic;
+          test2 = self.packages.${system}.test-multi-env;
         } ''
           echo "=========================================="
           echo "  Flox Manifest Fetch - Test Suite"
@@ -290,37 +173,38 @@
 
           mkdir -p $out
 
-          echo "Test 1: Direct Token"
-          cat $test1/test-name
+          echo "Test 1: Basic Manifest Reading"
+          if [ -f "$test1/test-name" ]; then
+            cat $test1/test-name
+            echo " ✓ PASSED"
+          else
+            echo " ✗ FAILED"
+          fi
           echo ""
 
-          echo "Test 2: Token File"
-          cat $test2/test-name
-          echo ""
-
-          echo "Test 3: Environment Variable"
-          cat $test3/test-name
-          echo ""
-
-          echo "Test Priority"
-          cat $testPriority/test-name
+          echo "Test 2: Multiple Environments"
+          if [ -f "$test2/test-name" ]; then
+            cat $test2/test-name
+            echo " ✓ PASSED"
+          else
+            echo " ✗ FAILED"
+          fi
           echo ""
 
           echo "=========================================="
-          echo "  All Tests Passed! ✓"
+          echo "  All Tests Completed"
           echo "=========================================="
 
           # Collect all test results
-          cp -r $test1 $out/test-1-direct-token
-          cp -r $test2 $out/test-2-token-file
-          cp -r $test3 $out/test-3-env-var
-          cp -r $testPriority $out/test-priority
+          cp -r $test1 $out/test-basic
+          cp -r $test2 $out/test-multi-env
         '';
       };
 
       # Development shell
       devShells.${system}.default = pkgs.mkShell {
         buildInputs = with pkgs; [
+          git
           nixpkgs-fmt
         ];
 
@@ -329,43 +213,22 @@
           echo "  Flox Manifest Fetch - Test Environment"
           echo "=========================================="
           echo ""
-          echo "IMPORTANT: Update test/flake.nix before testing:"
-          echo "  - testUser = \"${testUser}\"  (your Flox username)"
-          echo "  - testEnv = \"${testEnv}\"    (your environment)"
+          echo "IMPORTANT: This module uses a two-step workflow:"
           echo ""
-          echo "Available tests:"
+          echo "Step 1: Fetch manifests (run once or when they change)"
+          echo "  cd .."
+          echo "  nix run .#fetch-manifests -- --user ${testUser} --envs ${testEnv}"
           echo ""
-          echo "  1. Test direct token (priority 1):"
-          echo "     export FLOX_FLOXHUB_TOKEN='your-token'"
-          echo "     nix build .#test-1-direct-token --impure"
+          echo "  Or with environment variables:"
+          echo "  FLOX_USER=${testUser} FLOX_ENVS=${testEnv} nix run .#fetch-manifests"
           echo ""
-          echo "  2. Test token file (priority 2):"
-          echo "     export FLOX_FLOXHUB_TOKEN='your-token'"
-          echo "     nix build .#test-2-token-file --impure"
+          echo "Step 2: Run tests (pure Nix, no --impure needed!)"
+          echo "  cd test"
+          echo "  nix build .#test-basic"
+          echo "  nix build .#test-multi-env"
+          echo "  nix build .#test-all"
           echo ""
-          echo "  3. Test environment variable (priority 3):"
-          echo "     export FLOX_FLOXHUB_TOKEN='your-token'"
-          echo "     nix build .#test-3-env-var --impure"
-          echo ""
-          echo "  4. Test flox CLI from flake (priority 4):"
-          echo "     flox auth login"
-          echo "     nix build .#test-4-flox-cli --impure"
-          echo ""
-          echo "  5. Test priority order:"
-          echo "     export FLOX_FLOXHUB_TOKEN='your-token'"
-          echo "     nix build .#test-priority --impure"
-          echo ""
-          echo "  6. Test multiple environments:"
-          echo "     export FLOX_FLOXHUB_TOKEN='your-token'"
-          echo "     nix build .#test-multi-env --impure"
-          echo ""
-          echo "  7. Run all tests:"
-          echo "     export FLOX_FLOXHUB_TOKEN='your-token'"
-          echo "     nix build .#test-all --impure"
-          echo ""
-          echo "After building, check results:"
-          echo "  cat result/manifest.toml"
-          echo "  cat result/generation"
+          echo "Update testUser and testEnv in test/flake.nix before testing"
           echo ""
         '';
       };

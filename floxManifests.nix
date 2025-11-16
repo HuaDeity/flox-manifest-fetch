@@ -1,236 +1,153 @@
-{ config, lib, pkgs, floxPackage ? null, ... }:
+{ config, lib, pkgs, ... }:
 
 with lib;
 
 let
   cfg = config.floxManifests;
 
-  # Fetch a single flox manifest from floxmeta repo using builtins.fetchGit
-  fetchFloxManifest = { user, environment, token }:
+  # Read manifest from cache directory (pure operation)
+  readManifestFromCache = { user, environment, cacheDir }:
     let
-      # Fetch the floxmeta repo for this environment using builtins.fetchGit
-      floxmeta = builtins.fetchGit {
-        url = "https://oauth:${token}@api.flox.dev/git/${user}/floxmeta";
-        ref = environment;
-        # shallow = true; # Not all Nix versions support this
-      };
-
-      # Read the directory entries
-      entries = builtins.readDir floxmeta;
-
-      # Filter for numeric directory names (generations)
-      # entries is an attrset like { "1" = "directory"; "23" = "directory"; ... }
-      generations = lib.filterAttrs (name: type:
-        type == "directory" && builtins.match "[0-9]+" name != null
-      ) entries;
-
-      # Get list of generation numbers as integers
-      generationNumbers = map lib.toInt (builtins.attrNames generations);
-
-      # Find the latest (maximum) generation
-      latestGeneration =
-        if generationNumbers == [] then
-          throw "No generation directories found in floxmeta for ${user}/${environment}"
-        else
-          toString (lib.foldl lib.max 0 generationNumbers);
-
-      # Path to the manifest
-      manifestPath = "${floxmeta}/${latestGeneration}/env/manifest.toml";
-
+      envCacheDir = "${toString cacheDir}/${environment}";
+      manifestFile = "${envCacheDir}/manifest.toml";
+      generationFile = "${envCacheDir}/generation";
     in
-    # Create a derivation that copies the manifest
-    pkgs.runCommand "flox-manifest-${user}-${environment}" {
-      inherit latestGeneration;
-      passthru = {
-        inherit floxmeta latestGeneration;
-      };
-    } ''
-      if [ ! -f "${manifestPath}" ]; then
-        echo "Error: Manifest not found at ${manifestPath}" >&2
-        exit 1
-      fi
+    if !builtins.pathExists envCacheDir then
+      throw ''
+        Manifest cache not found for environment '${environment}'.
 
-      mkdir -p $out
-      cp "${manifestPath}" $out/manifest.toml
-      echo "${latestGeneration}" > $out/generation
-    '';
+        Run the fetch-manifests script first:
+          nix run .#fetch-manifests -- --user ${user} --envs ${environment}
 
-  # Resolve token with fallback chain
-  resolveToken =
-    # 1. Direct token option (Pure)
-    if cfg.token != null then
-      cfg.token
+        Or with environment variables:
+          FLOX_USER=${user} FLOX_ENVS=${environment} nix run .#fetch-manifests
+      ''
+    else if !builtins.pathExists manifestFile then
+      throw ''
+        Manifest file not found at: ${manifestFile}
+        Cache directory exists but is missing manifest.toml.
 
-    # 2. Token file (Pure if file is in store)
-    else if cfg.tokenFile != null then
-      builtins.readFile cfg.tokenFile
-
-    # 3. Environment variable (Impure - requires --impure)
-    else if builtins.getEnv "FLOX_FLOXHUB_TOKEN" != "" then
-      builtins.getEnv "FLOX_FLOXHUB_TOKEN"
-
-    # 4. Flox CLI (Impure - requires --impure and flox installed)
+        Re-run the fetch script:
+          nix run .#fetch-manifests -- --user ${user} --envs ${environment}
+      ''
     else
-      let
-        # Determine which flox binary to use
-        floxExe =
-          if cfg.floxPackage != null then
-            "${cfg.floxPackage}/bin/flox"
-          else
-            cfg.floxBin;
-
-        # Try to get token from flox CLI
-        tryFloxCli = pkgs.runCommand "flox-token-cli" {} ''
-          if command -v ${floxExe} >/dev/null 2>&1; then
-            ${floxExe} auth token > $out 2>/dev/null || echo "" > $out
-          else
-            echo "" > $out
-          fi
+      # Create a derivation that copies the cached manifest
+      pkgs.runCommand "flox-manifest-${user}-${environment}"
+        {
+          passthru = {
+            inherit environment;
+            generation = if builtins.pathExists generationFile
+                        then lib.removeSuffix "\n" (builtins.readFile generationFile)
+                        else "unknown";
+          };
+        }
+        ''
+          mkdir -p $out
+          cp "${manifestFile}" $out/manifest.toml
+          ${if builtins.pathExists generationFile then ''
+            cp "${generationFile}" $out/generation
+          '' else ''
+            echo "unknown" > $out/generation
+          ''}
         '';
-        cliToken = lib.removeSuffix "\n" (builtins.readFile tryFloxCli);
-      in
-      if cliToken != "" then
-        cliToken
-      # 5. Config file (Impure - requires --impure)
-      else
-        let
-          configPath = "${builtins.getEnv "HOME"}/.config/flox/flox.toml";
-        in
-        if builtins.pathExists configPath then
-          let
-            floxConfig = lib.importTOML configPath;
-          in
-          floxConfig.floxhub_token or (throw "floxhub_token not found in ${configPath}")
-        else
-          throw ''
-            Could not resolve Flox token. Please use one of:
-            1. Set floxManifests.token = "your-token"
-            2. Set floxManifests.tokenFile = /path/to/token/file
-            3. Set FLOX_FLOXHUB_TOKEN environment variable (requires --impure)
-            4. Run 'flox auth token' (requires --impure)
-            5. Configure ~/.config/flox/flox.toml with floxhub_token (requires --impure)
-          '';
 
-  # Build manifests for all environments
-  manifestDerivations = listToAttrs (map
-    (env: {
-      name = env;
-      value = fetchFloxManifest {
-        user = cfg.user;
-        environment = env;
-        token = resolveToken;
-      };
-    })
-    cfg.environments);
+  # Create manifest derivations for all configured environments
+  manifestDerivations =
+    if cfg.user == "" then
+      throw "floxManifests.user must be set"
+    else if cfg.environments == [] then
+      throw "floxManifests.environments must not be empty"
+    else
+      listToAttrs (map
+        (env: nameValuePair env (readManifestFromCache {
+          user = cfg.user;
+          environment = env;
+          cacheDir = cfg.cacheDir;
+        }))
+        cfg.environments);
 
 in
 {
   options.floxManifests = {
-    enable = mkOption {
-      type = types.bool;
-      default = false;
-      description = ''
-        Enable Flox manifest fetcher.
-        Fetches manifest.toml files from Flox environments.
-      '';
-    };
+    enable = mkEnableOption "Flox manifest fetching and management";
 
     user = mkOption {
       type = types.str;
+      default = "";
       example = "myusername";
       description = ''
-        Flox owner/username for the floxmeta repository.
+        Flox username for accessing FloxHub.
+        This is used to identify which user's environments to fetch.
       '';
     };
 
     environments = mkOption {
       type = types.listOf types.str;
-      default = [ "default" ];
+      default = [];
       example = [ "default" "development" "production" ];
       description = ''
-        List of environment names (git branches) to fetch manifests from.
-        Each environment corresponds to a branch in the floxmeta repository.
+        List of Flox environment names to fetch manifests for.
+        Each environment corresponds to a git branch in the floxmeta repository.
       '';
     };
 
-    token = mkOption {
-      type = types.nullOr types.str;
-      default = null;
-      description = ''
-        Flox Hub token (takes highest priority).
-        Note: This will be visible in the nix store. Use tokenFile for secrets.
-      '';
-    };
-
-    tokenFile = mkOption {
-      type = types.nullOr types.path;
-      default = null;
-      example = "/run/secrets/flox-token";
-      description = ''
-        Path to file containing Flox Hub token.
-        Preferred method for handling secrets.
-      '';
-    };
-
-    floxPackage = mkOption {
-      type = types.nullOr types.package;
-      default = floxPackage;
-      defaultText = "flox package from flake input";
-      description = ''
-        Flox package to use for 'flox auth token' command.
-        Defaults to the flox package from the flake input.
-        Used as fallback if no token is provided via other methods.
-      '';
-    };
-
-    floxBin = mkOption {
-      type = types.str;
-      default = "flox";
-      example = "/home/user/.nix-profile/bin/flox";
-      description = ''
-        Flox binary path or name (fallback if floxPackage is not available).
-        Used as fallback if no token is provided via other methods.
-        Requires --impure flag.
-      '';
-    };
-
-    outputPath = mkOption {
-      type = types.nullOr types.path;
-      default = null;
+    cacheDir = mkOption {
+      type = types.path;
+      default = ./.flox-manifests;
+      defaultText = "./.flox-manifests";
       example = "/etc/flox-manifests";
       description = ''
-        Optional path to copy manifests to.
-        If null, manifests are only available via the manifests attribute.
+        Directory where fetched manifests are cached.
+
+        Manifests must be pre-fetched using the fetch-manifests script:
+          nix run .#fetch-manifests -- --user USER --envs ENV1,ENV2
+
+        The cache directory structure:
+          .flox-manifests/
+            default/
+              manifest.toml
+              generation
+            development/
+              manifest.toml
+              generation
       '';
     };
 
     manifests = mkOption {
       type = types.attrsOf types.package;
       readOnly = true;
-      internal = true;
       description = ''
-        Output: Derivations containing manifest.toml files for each environment.
-        Access via: config.floxManifests.manifests.<environment>
+        Attribute set of manifest derivations, keyed by environment name.
+        Each derivation contains the manifest.toml file and generation number.
 
-        Example usage:
-          home.file."my-manifest".source =
-            "''${config.floxManifests.manifests.default}/manifest.toml";
+        Access manifests like:
+          config.floxManifests.manifests.default
+          config.floxManifests.manifests.development
+      '';
+    };
+
+    outputPath = mkOption {
+      type = types.nullOr types.path;
+      default = null;
+      example = "/etc/flox/manifests";
+      description = ''
+        Optional: Copy all manifests to this directory.
+        Useful for making manifests available system-wide.
       '';
     };
   };
 
   config = mkIf cfg.enable {
-    # Set the manifests output with validation
-    floxManifests.manifests =
-      if cfg.user == "" then
-        throw "floxManifests.user must be set"
-      else if cfg.environments == [] then
-        throw "floxManifests.environments must not be empty"
-      else
-        manifestDerivations;
+    # Set the manifests attribute
+    floxManifests.manifests = manifestDerivations;
 
     # Optionally copy manifests to outputPath
-    # This would be used differently in NixOS vs home-manager
-    # For now, users can access via the manifests attribute
+    environment.etc = mkIf (cfg.outputPath != null) (
+      listToAttrs (map
+        (env: nameValuePair "flox/manifests/${env}.toml" {
+          source = "${cfg.manifests.${env}}/manifest.toml";
+        })
+        cfg.environments)
+    );
   };
 }
