@@ -36,11 +36,10 @@
           # Manifest fetcher script
           # Usage: nix run .#fetch-manifests -- --user myuser --envs default,development
           # Or: FLOX_USER=myuser FLOX_ENVS=default,development nix run .#fetch-manifests
-          fetch-manifests = pkgs.writeScriptBin "fetch-manifests" ''
-            #!${pkgs.bash}/bin/bash
-            export PATH=${pkgs.lib.makeBinPath [ pkgs.git pkgs.coreutils pkgs.findutils ]}:$PATH
-            set -euo pipefail
-
+          fetch-manifests = pkgs.writeShellApplication {
+            name = "fetch-manifests";
+            runtimeInputs = with pkgs; [ git coreutils findutils ];
+            text = ''
             # Configuration
             CACHE_DIR="''${FLOX_CACHE_DIR:-.flox-manifests}"
             FLOX_USER="''${FLOX_USER:-}"
@@ -214,7 +213,8 @@
             echo ""
             echo "Cache directory contents:"
             ls -lah "$CACHE_DIR"
-          '';
+            '';
+          };
 
           # Default package - the fetcher script
           default = self.packages.${system}.fetch-manifests;
