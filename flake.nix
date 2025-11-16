@@ -38,13 +38,12 @@
           # Or: FLOX_USER=myuser FLOX_ENVS=default,development nix run .#fetch-manifests
           fetch-manifests = pkgs.writeShellApplication {
             name = "fetch-manifests";
-            runtimeInputs = with pkgs; [ git coreutils findutils ];
+            runtimeInputs = with pkgs; [ git coreutils findutils flox.packages.${system}.default ];
             text = ''
             # Configuration
             CACHE_DIR="''${FLOX_CACHE_DIR:-.flox-manifests}"
             FLOX_USER="''${FLOX_USER:-}"
             FLOX_ENVS="''${FLOX_ENVS:-}"
-            TOKEN="''${FLOX_FLOXHUB_TOKEN:-}"
 
             # Parse command line arguments
             while [[ $# -gt 0 ]]; do
@@ -61,10 +60,6 @@
                   CACHE_DIR="$2"
                   shift 2
                   ;;
-                --token)
-                  TOKEN="$2"
-                  shift 2
-                  ;;
                 --help|-h)
                   echo "Usage: fetch-manifests [OPTIONS]"
                   echo ""
@@ -74,14 +69,10 @@
                   echo "  --user USER         Flox username (or set FLOX_USER)"
                   echo "  --envs ENV1,ENV2    Comma-separated environments (or set FLOX_ENVS)"
                   echo "  --cache-dir DIR     Cache directory (default: .flox-manifests)"
-                  echo "  --token TOKEN       FloxHub token (or set FLOX_FLOXHUB_TOKEN)"
                   echo "  --help, -h          Show this help"
                   echo ""
-                  echo "Token resolution (in order):"
-                  echo "  1. --token argument"
-                  echo "  2. FLOX_FLOXHUB_TOKEN environment variable"
-                  echo "  3. flox auth token command"
-                  echo "  4. ~/.config/flox/flox.toml"
+                  echo "Authentication:"
+                  echo "  Uses 'flox auth token' - run 'flox auth login' first"
                   exit 0
                   ;;
                 *)
@@ -103,35 +94,13 @@
               exit 1
             fi
 
-            # Token resolution with fallback chain
+            # Get token from flox CLI
+            TOKEN=$(flox auth token 2>/dev/null || echo "")
             if [ -z "$TOKEN" ]; then
-              echo "No token provided, trying fallback methods..."
-
-              # Try flox CLI
-              if command -v flox >/dev/null 2>&1; then
-                echo "Trying: flox auth token"
-                TOKEN=$(flox auth token 2>/dev/null || echo "")
-              fi
-
-              # Try config file
-              if [ -z "$TOKEN" ] && [ -f "$HOME/.config/flox/flox.toml" ]; then
-                echo "Trying: ~/.config/flox/flox.toml"
-                TOKEN=$(grep '^floxhub_token' "$HOME/.config/flox/flox.toml" | cut -d'"' -f2 || echo "")
-              fi
-
-              if [ -z "$TOKEN" ]; then
-                echo "Error: No token found. Set FLOX_FLOXHUB_TOKEN or run 'flox auth login'" >&2
-                exit 1
-              fi
+              echo "Error: Failed to get token from 'flox auth token'" >&2
+              echo "Run 'flox auth login' first" >&2
+              exit 1
             fi
-
-            echo "==========================================="
-            echo "  Flox Manifest Fetcher"
-            echo "==========================================="
-            echo "User: $FLOX_USER"
-            echo "Environments: $FLOX_ENVS"
-            echo "Cache directory: $CACHE_DIR"
-            echo ""
 
             # Convert cache directory to absolute path
             if [[ "$CACHE_DIR" != /* ]]; then
@@ -147,18 +116,14 @@
             # Fetch each environment
             for env in "''${ENVS[@]}"; do
               env=$(echo "$env" | xargs)  # trim whitespace
-              echo "-------------------------------------------"
-              echo "Fetching environment: $env"
-              echo "-------------------------------------------"
 
               ENV_CACHE="$CACHE_DIR/$env"
               TEMP_DIR=$(mktemp -d)
 
-              # Clone the floxmeta repo
-              echo "Cloning floxmeta repository..."
-              if git clone --depth 1 --branch "$env" \
+              # Clone the floxmeta repo (quietly)
+              if git clone --quiet --depth 1 --branch "$env" \
                 "https://oauth:$TOKEN@api.flox.dev/git/$FLOX_USER/floxmeta" \
-                "$TEMP_DIR" 2>&1 | sed "s/$TOKEN/[REDACTED]/g"; then
+                "$TEMP_DIR" 2>&1 | grep -v "Cloning into" | sed "s/$TOKEN/[REDACTED]/g"; then
 
                 cd "$TEMP_DIR"
 
@@ -166,16 +131,14 @@
                 latest_gen=$(find . -maxdepth 1 -type d -name '[0-9]*' -printf '%f\n' | sort -n | tail -1)
 
                 if [ -z "$latest_gen" ]; then
-                  echo "Error: No generation directories found" >&2
+                  echo "Error: No generation directories found for $env" >&2
                   rm -rf "$TEMP_DIR"
                   exit 1
                 fi
 
-                echo "Latest generation: $latest_gen"
-
                 # Check manifest exists
                 if [ ! -f "$latest_gen/env/manifest.toml" ]; then
-                  echo "Error: Manifest not found at $latest_gen/env/manifest.toml" >&2
+                  echo "Error: Manifest not found for $env at generation $latest_gen" >&2
                   rm -rf "$TEMP_DIR"
                   exit 1
                 fi
@@ -187,32 +150,18 @@
                 cp "$latest_gen/env/manifest.toml" "$ENV_CACHE/manifest.toml"
                 echo "$latest_gen" > "$ENV_CACHE/generation"
 
-                echo "✓ Cached manifest to: $ENV_CACHE"
-                echo "  Generation: $latest_gen"
+                # Simple output: just environment and generation
+                echo "$env: generation $latest_gen"
 
                 # Cleanup
                 cd - >/dev/null
                 rm -rf "$TEMP_DIR"
               else
-                echo "Error: Failed to clone repository" >&2
+                echo "Error: Failed to fetch $env" >&2
                 rm -rf "$TEMP_DIR"
                 exit 1
               fi
-
-              echo ""
             done
-
-            echo "==========================================="
-            echo "  All manifests fetched successfully!"
-            echo "==========================================="
-            echo ""
-            echo "Next steps:"
-            echo "  1. Run your Nix builds (pure, no --impure needed):"
-            echo "     nixos-rebuild switch"
-            echo "     home-manager switch"
-            echo ""
-            echo "Cache directory contents:"
-            ls -lah "$CACHE_DIR"
             '';
           };
 
